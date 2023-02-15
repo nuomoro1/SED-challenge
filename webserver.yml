@@ -1,0 +1,71 @@
+---
+- name: Configure web server
+  hosts: server
+  become: true
+  tasks:
+    - name: Install Apache and SSL libraries
+      package:
+        name:
+          - apache2
+          - libapache2-mod-ssl
+          - openssl
+        state: present
+
+    - name: Create HTML file
+      copy:
+        content: |
+          <html>
+            <head>
+              <title>Hello World</title>
+            </head>
+            <body>
+              <h1>Hello World!</h1>
+            </body>
+          </html>
+        dest: /var/www/html/index.html
+
+    - name: Create self-signed SSL certificate
+      openssl_certificate:
+        path: /etc/ssl/certs/apache.crt
+        privatekey_path: /etc/ssl/private/apache.key
+        common_name: server.example.com
+        owner: root
+        group: root
+        size: 2048
+        days: 3650
+        state: present
+
+    - name: Configure Apache to use SSL
+      apache2_module:
+        name: ssl
+        state: present
+
+    - name: Configure Apache to redirect HTTP to HTTPS
+      apache2_mod_rewrite:
+        conf: /etc/apache2/sites-enabled/000-default.conf
+        state: present
+        regex: '^((?!/status).)*$'
+        rewrite_rule: 'Redirect permanent / https://{{ ansible_host }}/'
+
+    - name: Ensure appropriate ports are publicly exposed
+      ufw:
+        rule: allow
+        port: '443'
+        proto: tcp
+        state: enabled
+
+      register: ufw_https
+
+      - name: Block access to all other ports
+        ufw:
+          rule: deny
+          proto: tcp
+          state: enabled
+        when: ufw_https.changed
+
+      - name: Allow SSH traffic
+        ufw:
+          rule: allow
+          port: '22'
+          proto: tcp
+          state: enabled
